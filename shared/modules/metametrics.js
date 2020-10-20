@@ -51,6 +51,10 @@ export const segment = process.env.SEGMENT_WRITE_KEY
   ? new Analytics(process.env.SEGMENT_WRITE_KEY, { flushAt })
   : segmentNoop
 
+export const segmentLegacy = process.env.SEGMENT_LEGACY_WRITE_KEY
+  ? new Analytics(process.env.SEGMENT_LEGACY_WRITE_KEY, { flushAt })
+  : segmentNoop
+
 /**
  * We attach context to every meta metrics event that help to qualify our analytics.
  * This type has all optional values because it represents a returned object from a
@@ -92,6 +96,12 @@ export const segment = process.env.SEGMENT_WRITE_KEY
  * @property {string}  [currency] - ISO 4127 format currency for events with revenue, defaults to US dollars
  * @property {number}  [value] - Abstract "value" that this event has for MetaMask.
  * @property {boolean} [excludeMetaMetricsId] - whether to exclude the user's metametrics id for anonymity
+ * @property {string}  [metaMetricsId] - an override for the metaMetricsId in the event one is created as part
+ *  of an asynchronous workflow, such as awaiting the result of the metametrics opt-in function that generates the
+ *  user's metametrics id.
+ * @property {boolean} [matomoEvent] - is this event a holdover from matomo that needs further migration?
+ *  when true, sends the data to a special segment source that marks the event data as not conforming to our
+ *  ideal schema
  * @property {MetaMetricsEventContext} [additionalContext] - additional context to attach to event
  */
 
@@ -120,7 +130,9 @@ export function getTrackMetaMetricsEvent (
     revenue,
     currency,
     value,
+    metaMetricsId: metaMetricsIdOverride,
     excludeMetaMetricsId: excludeId,
+    matomoEvent = false,
     additionalContext = {},
   }) {
     if (!event || !category) {
@@ -177,13 +189,29 @@ export function getTrackMetaMetricsEvent (
       context,
     }
 
+    // If we are tracking sensitive data we will always use the anonymousId property
+    // as well as our METAMETRICS_ANONYMOUS_ID. This prevents us from associating potentially
+    // identifiable information with a specific id. During the opt in flow we will track all
+    // events, but do so with the anonymous id. The one exception to that rule is after the
+    // user opts in to MetaMetrics. When that happens we receive back the user's new MetaMetrics
+    // id before it is fully persisted to state. To avoid a race condition we explicitly pass the
+    // new id to the track method. In that case we will track the opt in event to the user's id.
+    // In all other cases we use the metaMetricsId from state.
     if (excludeMetaMetricsId) {
+      trackOptions.anonymousId = METAMETRICS_ANONYMOUS_ID
+    } else if (isOptIn && metaMetricsIdOverride) {
+      trackOptions.userId = metaMetricsIdOverride
+    } else if (isOptIn) {
       trackOptions.anonymousId = METAMETRICS_ANONYMOUS_ID
     } else {
       trackOptions.userId = metaMetricsId
     }
 
-    segment.track(trackOptions)
+    if (matomoEvent === true) {
+      segmentLegacy.track(trackOptions)
+    } else {
+      segment.track(trackOptions)
+    }
 
     /**
      * Some events will want to wait for the track before proceeding. Segment does
