@@ -546,7 +546,10 @@ export default class SwapsController {
       )
 
       // Performance savings are the total savings minus the fee savings
-      savings.performance = savings.total.minus(savings.fee, 10).toString(10)
+      savings.performance = savings.total
+        .minus(savings.fee, 10)
+        .plus(metaMaskFeeInEthForBestQuote)
+        .toString(10)
       savings.total = savings.total.toString(10)
       savings.fee = savings.fee.toString(10)
       savings.metaMaskFee = metaMaskFeeInEthForBestQuote.toString(10)
